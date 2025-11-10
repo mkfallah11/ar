@@ -3,74 +3,46 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
-  <title>AR Multi Markers Fixed</title>
+  <title>AR Multi Markers (Auto Start)</title>
   <style>
-    html,body{height:100%;margin:0;background:linear-gradient(180deg,#071124,#0f1724);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;}
-    #app{height:100%;display:flex;flex-direction:column;align-items:stretch;}
-    #overlayUI{position:fixed;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:12px;z-index:50}
-    .card{backdrop-filter:blur(6px);background:rgba(255,255,255,0.04);padding:8px;border-radius:999px;display:flex;gap:8px;align-items:center;}
-    button{background:transparent;border:1px solid rgba(255,255,255,0.06);color:white;padding:8px 12px;border-radius:10px;font-weight:600;cursor:pointer}
-    button.primary{background:linear-gradient(90deg,#4dd0e1,#7bdff0);color:#052026;border:0}
-    #hint{position:fixed;left:12px;bottom:16px;right:12px;color:#9aa6b2;font-size:13px;text-align:center;z-index:40}
-    #message{position:fixed;left:50%;transform:translateX(-50%);top:60px;background:rgba(0,0,0,0.5);padding:8px 12px;border-radius:10px;color:white;z-index:60}
-    canvas{touch-action:auto;display:block;}
+    html,body{height:100%;margin:0;background:#000;font-family:sans-serif;overflow:hidden;}
+    #message{position:fixed;left:50%;top:20px;transform:translateX(-50%);color:white;background:rgba(0,0,0,0.5);padding:6px 12px;border-radius:8px;font-size:14px;z-index:100;}
+    canvas{display:block;touch-action:none;}
   </style>
 </head>
 <body>
-<div id="app">
-  <div id="overlayUI">
-    <div class="card">
-      <div style="font-weight:700">AR Multi Markers</div>
-    </div>
-    <div class="card" id="controls">
-      <button id="btnReset">reset</button>
-    </div>
-  </div>
-  <div id="message" style="display:none"></div>
-  <div id="container"></div>
-  <div id="hint">tap on surface to add marker — tap marker to remove</div>
-</div>
+<div id="message">در حال راه‌اندازی AR...</div>
 
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.152.2/build/three.module.js';
 import { ARButton } from 'https://unpkg.com/three@0.152.2/examples/jsm/webxr/ARButton.js';
 
-const btnReset = document.getElementById('btnReset');
+let camera, scene, renderer, controller;
+const clock = new THREE.Clock();
+const markers = [];
+const colors = [0x4dd0e1, 0xff7ab6, 0x7b61ff, 0x6ee07a];
 const message = document.getElementById('message');
-const container = document.getElementById('container');
 
-let camera, scene, renderer, reticle, controller;
-let clock = new THREE.Clock();
-let markers = [];
-const colors = [0x4dd0e1, 0x7b61ff, 0xff7ab6, 0x6ee07a];
-
-function showMsg(text, timeout = 2500){
-  message.style.display='block';
-  message.textContent=text;
+function showMsg(txt, t=2500){
+  message.textContent = txt;
   clearTimeout(message._t);
-  message._t=setTimeout(()=> message.style.display='none', timeout);
+  message._t = setTimeout(()=>message.textContent='', t);
 }
 
-// init three.js + scene
 function initThree(){
-  renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+  renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
   renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.setSize(window.innerWidth,window.innerHeight);
+  renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
-  container.appendChild(renderer.domElement);
+  document.body.appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
+
   camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 100);
-
-  const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const light = new THREE.DirectionalLight(0xffffff, 0.8);
+  light.position.set(1,1,1);
   scene.add(light);
-
-  const ringGeo = new THREE.RingGeometry(0.07,0.09,32);
-  const ringMat = new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide,transparent:true,opacity:0.85});
-  reticle = new THREE.Mesh(ringGeo,ringMat);
-  reticle.rotation.x = -Math.PI/2;
-  reticle.visible = false;
-  scene.add(reticle);
 
   window.addEventListener('resize', ()=>{
     camera.aspect = window.innerWidth/window.innerHeight;
@@ -79,160 +51,106 @@ function initThree(){
   });
 }
 
-// create a marker
-function createMarker(text, colorIndex=0){
+// create hollow sphere marker
+function createMarker(label="marker"){
   const group = new THREE.Group();
 
-  const sphereGeo = new THREE.SphereGeometry(0.1, 32, 24);
-  const sphereMat = new THREE.MeshStandardMaterial({
-    metalness:0.3, roughness:0.2,
-    emissive:colors[colorIndex],
-    emissiveIntensity:0.5
+  const sphereGeo = new THREE.SphereGeometry(0.07, 24, 16);
+  const sphereMat = new THREE.MeshBasicMaterial({
+    color: colors[Math.floor(Math.random()*colors.length)],
+    wireframe:true
   });
   const sphere = new THREE.Mesh(sphereGeo, sphereMat);
-  sphere.name = 'sphere';
   group.add(sphere);
 
-  const torusGeo = new THREE.TorusGeometry(0.15, 0.015, 16, 100);
-  const torusMat = new THREE.MeshBasicMaterial({color:colors[colorIndex], transparent:true, opacity:0.8});
-  const halo = new THREE.Mesh(torusGeo, torusMat);
-  halo.rotation.x = Math.PI/2;
-  halo.position.y = -0.02;
-  halo.name = 'halo';
-  group.add(halo);
-
+  // optional label text
   const canvas = document.createElement('canvas');
-  canvas.width=512; canvas.height=128;
+  canvas.width=256; canvas.height=64;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle='rgba(5,32,38,0.9)';
-  ctx.fillRect(0,0,512,128);
-  ctx.font='bold 46px system-ui';
+  ctx.fillStyle='rgba(0,0,0,0.6)';
+  ctx.fillRect(0,0,256,64);
+  ctx.font='bold 28px sans-serif';
   ctx.fillStyle='white';
   ctx.textAlign='center';
-  ctx.fillText(text, 256, 80);
+  ctx.fillText(label,128,44);
   const texture = new THREE.CanvasTexture(canvas);
-  const labelMat = new THREE.MeshBasicMaterial({map:texture});
-  const labelGeo = new THREE.PlaneGeometry(0.6,0.15);
-  const labelMesh = new THREE.Mesh(labelGeo, labelMat);
-  labelMesh.position.y = 0.25;
-  labelMesh.name = 'label';
+  const labelMat = new THREE.MeshBasicMaterial({map:texture, transparent:true});
+  const labelMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.25,0.07), labelMat);
+  labelMesh.position.set(0,0.15,0);
   group.add(labelMesh);
 
-  group.userData.isMarker = true;
   return group;
 }
 
-// place marker
-function placeMarkerAt(pos, quat){
-  const labelText = prompt("برچسب مارکر را وارد کنید:", "مارکر جدید") || "مارکر جدید";
-  const colorIndex = Math.floor(Math.random()*colors.length);
-  const marker = createMarker(labelText, colorIndex);
-  marker.position.copy(pos);
-  if(quat) marker.quaternion.copy(quat);
-  scene.add(marker);
-  markers.push(marker);
-  showMsg('marker added');
-}
-
-// tap detection
+// tap handler
 function onSelect() {
-  if (!controller) return;
-
   const raycaster = new THREE.Raycaster();
   const tempMatrix = new THREE.Matrix4().identity().extractRotation(controller.matrixWorld);
   raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
   raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
 
+  // check for marker hit
   const intersects = raycaster.intersectObjects(markers, true);
   if (intersects.length > 0) {
-    const m = intersects[0].object.parent;
-    scene.remove(m);
-    markers = markers.filter(x => x !== m);
-    showMsg('marker removed');
+    const obj = intersects[0].object.parent;
+    scene.remove(obj);
+    markers.splice(markers.indexOf(obj), 1);
+    showMsg('مارکر حذف شد');
     return;
   }
 
-  if (reticle && reticle.visible) {
-    const pos = new THREE.Vector3();
-    pos.setFromMatrixPosition(reticle.matrix);
-    const quat = new THREE.Quaternion();
-    quat.setFromRotationMatrix(reticle.matrix);
-    placeMarkerAt(pos, quat);
-  }
+  // create new marker forward of camera
+  const pos = new THREE.Vector3();
+  pos.setFromMatrixPosition(controller.matrixWorld);
+  const dir = new THREE.Vector3(0,0,-1).applyMatrix4(tempMatrix).multiplyScalar(0.4);
+  pos.add(dir);
+
+  const label = `مارکر ${markers.length+1}`;
+  const marker = createMarker(label);
+  marker.position.copy(pos);
+  scene.add(marker);
+  markers.push(marker);
+  showMsg(`مارکر ${markers.length} افزوده شد`);
 }
 
 // animate markers
 function animateMarkers(delta){
   for(const m of markers){
-    const halo = m.getObjectByName('halo');
-    if(halo) halo.rotation.z += delta * 0.6;
-    const sphere = m.getObjectByName('sphere');
-    if(sphere){
-      const t = performance.now()*0.001;
-      sphere.material.emissiveIntensity = 0.3 + Math.abs(Math.sin(t*2))*0.5;
-    }
-    const label = m.getObjectByName('label');
-    if(label) label.lookAt(renderer.xr.getCamera(camera).position);
+    m.rotation.y += delta * 0.5;
+    m.children[1].lookAt(camera.position); // keep label facing camera
   }
 }
 
-// start AR
-async function startARSession(){
+async function startAR(){
   if(!renderer) initThree();
-  const arButton = ARButton.createButton(renderer, { requiredFeatures:['hit-test'] });
+  const arButton = ARButton.createButton(renderer, {requiredFeatures: []});
   arButton.style.display='none';
   document.body.appendChild(arButton);
 
+  renderer.setAnimationLoop(render);
   const sessionPromise = new Promise((resolve)=>{
     renderer.xr.addEventListener('sessionstart', ()=>resolve(true));
     renderer.xr.addEventListener('sessionend', ()=>resolve(false));
     arButton.click();
   });
   const started = await sessionPromise;
-  if(!started){ showMsg('xr session not started'); return; }
-
-  renderer.setAnimationLoop(render);
-  const session = renderer.xr.getSession();
-  const viewerSpace = await session.requestReferenceSpace('viewer');
-  const hitTestSource = await session.requestHitTestSource({space:viewerSpace});
-  session._hitTestSource = hitTestSource;
+  if(!started){ showMsg('AR شروع نشد'); return; }
 
   controller = renderer.xr.getController(0);
   controller.addEventListener('select', onSelect);
   scene.add(controller);
+
+  showMsg('برای افزودن مارکر، در هر جهت لمس کن');
 }
 
-// render loop
-function render(timestamp, frame){
+function render(){
   const delta = clock.getDelta();
-  if(frame){
-    const session = renderer.xr.getSession();
-    if(session && session._hitTestSource){
-      const hitTestResults = frame.getHitTestResults(session._hitTestSource);
-      if(hitTestResults.length>0){
-        const hit = hitTestResults[0];
-        const pose = hit.getPose(renderer.xr.getReferenceSpace());
-        reticle.visible = true;
-        reticle.matrix.fromArray(pose.transform.matrix);
-        reticle.matrix.decompose(reticle.position, reticle.quaternion, reticle.scale);
-      } else reticle.visible = false;
-    }
-  }
   animateMarkers(delta);
   renderer.render(scene, camera);
 }
 
-// reset button
-btnReset.addEventListener('click', ()=>{
-  for(const m of markers) scene.remove(m);
-  markers=[];
-  showMsg('all markers removed');
-});
-
-// auto start
 initThree();
-startARSession();
-showMsg('starting ar...');
+startAR();
 </script>
 </body>
 </html>
